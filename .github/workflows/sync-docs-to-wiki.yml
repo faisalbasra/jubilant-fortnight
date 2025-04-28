@@ -1,0 +1,73 @@
+name: Sync /docs to GitHub Wiki
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'docs/**'
+  workflow_dispatch:
+
+jobs:
+  sync-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Configure Git
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+
+      - name: Clone Wiki Repository
+        run: |
+          git clone https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.wiki.git wiki
+
+      - name: Clean old Wiki files
+        run: |
+          rm -rf wiki/*
+
+      - name: Copy Public Docs to Wiki
+        run: |
+          mkdir -p wiki/docs
+          rsync -av --exclude 'internal/' docs/ wiki/docs/
+
+      - name: Auto-generate Home.md and Section Indexes
+        run: |
+          echo "# Documentation Index" > wiki/Home.md
+          echo "" >> wiki/Home.md
+
+          for section in wiki/docs/*; do
+            if [ -d "$section" ]; then
+              section_name=$(basename "$section")
+              section_file="wiki/${section_name}.md"
+
+              echo "# ${section_name^} Section" > "$section_file"
+              echo "" >> "$section_file"
+
+              for file in "$section"/*.md; do
+                filename=$(basename "$file" .md)
+                pretty_name=$(echo "$filename" | sed 's/-/ /g')
+                echo "- [${pretty_name^}](docs/$section_name/$filename)" >> "$section_file"
+              done
+
+              section_pretty=$(echo "$section_name" | sed 's/-/ /g')
+              echo "- [${section_pretty^}](./${section_name})" >> wiki/Home.md
+            fi
+          done
+
+          for file in wiki/docs/*.md; do
+            if [ -f "$file" ]; then
+              filename=$(basename "$file" .md)
+              pretty_name=$(echo "$filename" | sed 's/-/ /g')
+              echo "- [${pretty_name^}](docs/$filename)" >> wiki/Home.md
+            fi
+          done
+
+      - name: Commit and Push to Wiki
+        working-directory: wiki
+        run: |
+          git add .
+          git commit -m "Auto-sync docs and update indexes" || echo "No changes to commit"
+          git push
